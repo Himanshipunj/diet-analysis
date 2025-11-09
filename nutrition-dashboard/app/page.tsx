@@ -2,346 +2,630 @@
 
 import { useState, useEffect } from "react";
 import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  Stack,
-  TextField,
-  MenuItem,
-  Slider,
-  FormControl,
-  InputLabel,
-  Select,
-} from "@mui/material";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-  ScatterChart,
-  Scatter,
-  ResponsiveContainer,
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    PieChart,
+    Pie,
+    Cell,
+    ScatterChart,
+    Scatter,
+    ResponsiveContainer,
 } from "recharts";
 
 const API_BASE =
-  "https://diet-processor-func-dnfzf2bvcpbrf4by.westus2-01.azurewebsites.net/api/diet-processor";
+    "https://diet-processor-func-dnfzf2bvcpbrf4by.westus2-01.azurewebsites.net/api/diet-processor";
 
 // Color palette for charts
-const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042'];
+const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#0088fe', '#00c49f'];
+
+interface Recipe {
+    recipe_name: string;
+    diet_type: string;
+    cuisine_type: string;
+    protein: number;
+    carbs: number;
+    fat: number;
+}
+
+interface ChartData {
+    labels: string[];
+    datasets: any[];
+}
+
+interface NutritionalInsights {
+    summary: {
+        total_recipes: number;
+        total_diet_types: number;
+        total_cuisine_types: number;
+        most_common_diet: string;
+        most_common_cuisine: string;
+    };
+    macronutrients: any;
+    nutrient_ranges: any;
+    diet_distribution: any;
+}
 
 export default function Dashboard() {
-  const [macronutrients, setMacronutrients] = useState<any>({});
-  const [cuisineDistribution, setCuisineDistribution] = useState<any>({});
-  const [comparisonData, setComparisonData] = useState<any[]>([]);
-  const [topRecipes, setTopRecipes] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isClient, setIsClient] = useState(false);
+    const [insights, setInsights] = useState<NutritionalInsights | null>(null);
+    const [barChartData, setBarChartData] = useState<ChartData | null>(null);
+    const [scatterData, setScatterData] = useState<any>(null);
+    const [heatmapData, setHeatmapData] = useState<any>(null);
+    const [pieChartData, setPieChartData] = useState<ChartData | null>(null);
+    const [recipes, setRecipes] = useState<Recipe[]>([]);
+    const [clusters, setClusters] = useState<any>(null);
+    const [dietTypes, setDietTypes] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-  // Dynamic parameters for top-recipes API
-  const [selectedNutrient, setSelectedNutrient] = useState("Protein");
-  const [recipeCount, setRecipeCount] = useState(10);
+    // Filter states
+    const [searchTerm, setSearchTerm] = useState("");
+    const [selectedDietType, setSelectedDietType] = useState("");
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalRecipes, setTotalRecipes] = useState(0);
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
+    // Chart customization
+    const [scatterX, setScatterX] = useState("Protein");
+    const [scatterY, setScatterY] = useState("Carbs");
 
-  // Fetch functions
-  const getMacronutrients = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/macronutrients`);
-      const data = await res.json();
-      setMacronutrients(data);
-    } catch (error) {
-      console.error('Error fetching macronutrients:', error);
-    }
-    setLoading(false);
-  };
+    // Utility functions
+    const showLoading = (show: boolean) => setLoading(show);
+    const showError = (message: string) => {
+        setError(message);
+        setTimeout(() => setError(null), 5000);
+    };
 
-  const getCuisineDistribution = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/cuisine-distribution`);
-      const data = await res.json();
-      setCuisineDistribution(data);
-    } catch (error) {
-      console.error('Error fetching cuisine distribution:', error);
-    }
-    setLoading(false);
-  };
+    // API functions
+    const apiCall = async (endpoint: string, params: Record<string, any> = {}) => {
+        try {
+            const url = new URL(API_BASE + endpoint);
+            Object.keys(params).forEach(key => {
+                if (params[key]) url.searchParams.append(key, params[key]);
+            });
 
-  const getComparison = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/comparison`);
-      const data = await res.json();
-      setComparisonData(data);
-    } catch (error) {
-      console.error('Error fetching comparison data:', error);
-    }
-    setLoading(false);
-  };
+            const response = await fetch(url.toString());
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error: any) {
+            console.error('API Error:', error);
+            showError(`API Error: ${error.message}`);
+            throw error;
+        }
+    };
 
-  const getTopRecipes = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/top-recipes?nutrient=${selectedNutrient}&n=${recipeCount}`);
-      const data = await res.json();
-      setTopRecipes(data);
-    } catch (error) {
-      console.error('Error fetching top recipes:', error);
-    }
-    setLoading(false);
-  };
+    // Load functions
+    const loadNutritionalInsights = async () => {
+        try {
+            const data = await apiCall('/nutritional-insights');
+            setInsights(data);
+        } catch (error) {
+            console.error('Failed to load insights:', error);
+        }
+    };
 
-  useEffect(() => {
-    if (isClient) {
-      getMacronutrients();
-      getCuisineDistribution();
-      getComparison();
-      getTopRecipes();
-    }
-  }, [isClient]);
+    const loadBarChart = async () => {
+        try {
+            const data = await apiCall('/bar-chart');
+            setBarChartData(data);
+        } catch (error) {
+            console.error('Failed to load bar chart:', error);
+        }
+    };
 
-  // Update top recipes when parameters change
-  useEffect(() => {
-    if (isClient) {
-      getTopRecipes();
-    }
-  }, [selectedNutrient, recipeCount, isClient]);
+    const loadScatterPlot = async (xNutrient = scatterX, yNutrient = scatterY) => {
+        try {
+            const data = await apiCall('/scatter-plot', { x: xNutrient, y: yNutrient });
+            setScatterData(data);
+        } catch (error) {
+            console.error('Failed to load scatter plot:', error);
+        }
+    };
 
-  // Transform data for charts
-  const transformMacronutrientsForChart = () => {
-    return Object.entries(macronutrients).map(([dietType, nutrients]: [string, any]) => ({
-      dietType,
-      protein: nutrients.Protein || 0,
-      carbs: nutrients.Carbs || 0,
-      fat: nutrients.Fat || 0,
-    }));
-  };
+    const loadHeatmap = async () => {
+        try {
+            const data = await apiCall('/heatmap');
+            setHeatmapData(data);
+        } catch (error) {
+            console.error('Failed to load heatmap:', error);
+        }
+    };
 
-  const transformCuisineDistributionForChart = () => {
-    if (!cuisineDistribution || Object.keys(cuisineDistribution).length === 0) return [];
+    const loadPieChart = async () => {
+        try {
+            const data = await apiCall('/pie-chart');
+            setPieChartData(data);
+        } catch (error) {
+            console.error('Failed to load pie chart:', error);
+        }
+    };
 
-    const allCuisines: { [key: string]: number } = {};
-    Object.values(cuisineDistribution).forEach((dietCuisines: any) => {
-      Object.entries(dietCuisines).forEach(([cuisine, count]: [string, any]) => {
-        allCuisines[cuisine] = (allCuisines[cuisine] || 0) + count;
-      });
-    });
+    const loadRecipes = async (page = 1) => {
+        try {
+            const params = {
+                page: page,
+                page_size: 12,
+                diet_type: selectedDietType,
+                search: searchTerm
+            };
 
-    return Object.entries(allCuisines)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 6)
-      .map(([cuisine, count]) => ({
-        cuisine,
-        count,
-      }));
-  };
+            const data = await apiCall('/recipes', params);
+            setRecipes(data.recipes);
+            setCurrentPage(data.pagination.current_page);
+            setTotalPages(data.pagination.total_pages);
+            setTotalRecipes(data.pagination.total_recipes);
+        } catch (error) {
+            console.error('Failed to load recipes:', error);
+        }
+    };
 
-  const transformTopRecipesForChart = () => {
-    return topRecipes.map((recipe, index) => ({
-      rank: index + 1,
-      name: recipe.recipe_name,
-      value: recipe.nutrient_value,
-      dietType: recipe.diet_type,
-      cuisine: recipe.cuisine_type,
-    }));
-  };
+    const loadClusters = async () => {
+        try {
+            const data = await apiCall('/clusters');
+            setClusters(data);
+        } catch (error) {
+            console.error('Failed to load clusters:', error);
+        }
+    };
 
-  return (
-    <Box sx={{ p: 4 }}>
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        Nutrition Analysis Dashboard
-      </Typography>
+    const loadDietTypes = async () => {
+        try {
+            const data = await apiCall('/diet-types');
+            setDietTypes(data.diet_types);
+        } catch (error) {
+            console.error('Failed to load diet types:', error);
+        }
+    };
 
-      <Typography variant="h6" sx={{ mt: 3 }}>
-        Data Visualization
-      </Typography>
+    const loadAllCharts = async () => {
+        showLoading(true);
+        try {
+            await Promise.all([
+                loadBarChart(),
+                loadScatterPlot(),
+                loadHeatmap(),
+                loadPieChart()
+            ]);
+        } catch (error) {
+            console.error('Error loading charts:', error);
+        } finally {
+            showLoading(false);
+        }
+    };
 
-      {/* Dynamic Parameters Control Panel */}
-      <Card sx={{ p: 3, mt: 3, mb: 3 }}>
-        <Typography variant="h6" fontWeight="bold" gutterBottom>
-          Top Recipes Parameters
-        </Typography>
-        <Stack direction="row" spacing={3} alignItems="center">
-          <FormControl sx={{ minWidth: 200 }}>
-            <InputLabel>Nutrient Type</InputLabel>
-            <Select
-              value={selectedNutrient}
-              label="Nutrient Type"
-              onChange={(e) => setSelectedNutrient(e.target.value)}
-            >
-              <MenuItem value="Protein">Protein</MenuItem>
-              <MenuItem value="Carbs">Carbohydrates</MenuItem>
-              <MenuItem value="Fat">Fat</MenuItem>
-            </Select>
-          </FormControl>
+    // Initialize dashboard
+    const initializeDashboard = async () => {
+        showLoading(true);
+        try {
+            await Promise.all([
+                loadNutritionalInsights(),
+                loadDietTypes(),
+                loadAllCharts(),
+                loadRecipes()
+            ]);
+        } catch (error) {
+            console.error('Failed to initialize dashboard:', error);
+        } finally {
+            showLoading(false);
+        }
+    };
 
-          <Box sx={{ width: 300 }}>
-            <Typography gutterBottom>Number of Recipes: {recipeCount}</Typography>
-            <Slider
-              value={recipeCount}
-              onChange={(e, newValue) => setRecipeCount(newValue as number)}
-              valueLabelDisplay="auto"
-              step={5}
-              marks
-              min={5}
-              max={50}
-            />
-          </Box>
-        </Stack>
-      </Card>
+    // Event handlers
+    const handleApplyFilters = () => {
+        loadRecipes(1);
+    };
 
-      <Stack direction="row" spacing={3} sx={{ mt: 2, flexWrap: "wrap" }}>
-        {/* Macronutrient Bar Chart */}
-        <Card sx={{ p: 2, width: 350 }}>
-          <Typography variant="subtitle1" fontWeight="bold">
-            Macronutrient Analysis
-          </Typography>
-          <Typography variant="body2">Average nutrient content by diet type</Typography>
-          <BarChart width={320} height={250} data={transformMacronutrientsForChart()}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="dietType" />
-            <YAxis />
-            <Tooltip />
-            <Bar dataKey="protein" fill="#8884d8" name="Protein(g)" />
-            <Bar dataKey="carbs" fill="#82ca9d" name="Carbs(g)" />
-            <Bar dataKey="fat" fill="#ffc658" name="Fat(g)" />
-          </BarChart>
-        </Card>
+    const handleClearFilters = () => {
+        setSearchTerm("");
+        setSelectedDietType("");
+        setTimeout(() => loadRecipes(1), 100);
+    };
 
-        {/* Comparison Scatter Plot */}
-        <Card sx={{ p: 2, width: 350 }}>
-          <Typography variant="subtitle1" fontWeight="bold">
-            Nutritional Relationship
-          </Typography>
-          <Typography variant="body2">
-            Protein vs Carbohydrate relationship
-          </Typography>
-          <ScatterChart width={320} height={250} data={comparisonData}>
-            <CartesianGrid />
-            <XAxis dataKey="protein" name="Protein" />
-            <YAxis dataKey="carbs" name="Carbohydrates" />
-            <Tooltip formatter={(value: any, name: any) => [value + 'g', name]} />
-            <Scatter dataKey="protein" fill="#2e7d32" />
-          </ScatterChart>
-        </Card>
+    const handleScatterChange = () => {
+        loadScatterPlot(scatterX, scatterY);
+    };
 
-        {/* Cuisine Distribution Pie Chart */}
-        <Card sx={{ p: 2, width: 350 }}>
-          <Typography variant="subtitle1" fontWeight="bold">
-            Cuisine Distribution
-          </Typography>
-          <Typography variant="body2">
-            Recipe distribution by cuisine type
-          </Typography>
-          <PieChart width={320} height={250}>
-            <Pie
-              data={transformCuisineDistributionForChart()}
-              dataKey="count"
-              nameKey="cuisine"
-              cx="50%"
-              cy="50%"
-              outerRadius={80}
-              fill="#8884d8"
-              label
-            >
-              {transformCuisineDistributionForChart().map((entry, i) => (
-                <Cell
-                  key={i}
-                  fill={COLORS[i % 4]}
-                />
-              ))}
-            </Pie>
-            <Tooltip />
-          </PieChart>
-        </Card>
-      </Stack>
+    // Transform data for charts
+    const transformBarChartData = () => {
+        if (!barChartData?.datasets) return [];
 
-      {/* Top Recipes Chart */}
-      <Card sx={{ p: 3, mt: 3, width: '100%' }}>
-        <Typography variant="h6" fontWeight="bold" gutterBottom>
-          Top {recipeCount} Recipes by {selectedNutrient} Content
-        </Typography>
-        <Typography variant="body2" gutterBottom sx={{ mb: 2 }}>
-          Highest {selectedNutrient.toLowerCase()} content recipes from the dataset
-        </Typography>
-        <Box sx={{ width: '100%', height: 400 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={transformTopRecipesForChart()}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="rank"
-                label={{ value: 'Recipe Rank', position: 'insideBottom', offset: -5 }}
-              />
-              <YAxis
-                label={{ value: `${selectedNutrient} (g)`, angle: -90, position: 'insideLeft' }}
-              />
-              <Tooltip
-                formatter={(value: any) => [`${value}g`, selectedNutrient]}
-                labelFormatter={(rank: any) => {
-                  const recipe = transformTopRecipesForChart().find(r => r.rank === rank);
-                  return recipe ? `#${rank}: ${recipe.name}` : `Recipe #${rank}`;
-                }}
-              />
-              <Bar dataKey="value" fill="#8884d8" />
-            </BarChart>
-          </ResponsiveContainer>
-        </Box>
-      </Card>
+        const labels = barChartData.labels || [];
+        const datasets = barChartData.datasets;
 
-      {/* Recipe Details */}
-      <Card sx={{ p: 3, mt: 3 }}>
-        <Typography variant="h6" fontWeight="bold" gutterBottom>
-          Top Recipes Details
-        </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2, mt: 2 }}>
-          {topRecipes.slice(0, 6).map((recipe, index) => (
-            <Card key={index} sx={{ p: 2, bgcolor: index < 3 ? 'primary.light' : 'grey.100' }}>
-              <Typography variant="subtitle2" fontWeight="bold">
-                #{index + 1} {recipe.recipe_name}
-              </Typography>
-              <Typography variant="body2">
-                {selectedNutrient}: {recipe.nutrient_value?.toFixed(1)}g
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Diet: {recipe.diet_type} | Cuisine: {recipe.cuisine_type}
-              </Typography>
-            </Card>
-          ))}
-        </Box>
-      </Card>
+        return labels.map((label, index) => ({
+            dietType: label,
+            protein: datasets[0]?.data[index] || 0,
+            carbs: datasets[1]?.data[index] || 0,
+            fat: datasets[2]?.data[index] || 0,
+        }));
+    };
 
-      {/* API Buttons */}
-      <Box sx={{ mt: 4 }}>
-        <Typography variant="h6">Data Controls</Typography>
-        <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-          <Button variant="contained" onClick={getMacronutrients} disabled={loading}>
-            Get Nutrition Data
-          </Button>
-          <Button variant="contained" color="success" onClick={getComparison} disabled={loading}>
-            Get Comparison Data
-          </Button>
-          <Button variant="contained" color="secondary" onClick={getCuisineDistribution} disabled={loading}>
-            Get Cuisine Distribution
-          </Button>
-          <Button variant="contained" color="warning" onClick={getTopRecipes} disabled={loading}>
-            Refresh Top Recipes
-          </Button>
-        </Stack>
-      </Box>
+    const transformScatterData = () => {
+        if (!scatterData?.data) return [];
+        return scatterData.data.map((point: any) => ({
+            x: point.x,
+            y: point.y,
+            dietType: point.diet_type,
+            recipeName: point.recipe_name
+        }));
+    };
 
-      <Typography variant="body2" textAlign="center" sx={{ mt: 6, color: "gray" }}>
-        © 2025 Nutrition Analysis Dashboard. Azure Functions & Next.js
-      </Typography>
-    </Box>
-  );
+    const transformPieChartData = () => {
+        if (!pieChartData?.datasets?.[0]?.data) return [];
+
+        const labels = pieChartData.labels || [];
+        const data = pieChartData.datasets[0].data;
+
+        return labels.map((label, index) => ({
+            name: label,
+            value: data[index] || 0
+        }));
+    };
+
+    // Effects
+    useEffect(() => {
+        initializeDashboard();
+    }, []);
+
+    useEffect(() => {
+        handleScatterChange();
+    }, [scatterX, scatterY]);
+
+    return (
+        <div className="bg-gray-100 min-h-screen">
+            {/* Header */}
+            <header className="bg-blue-600 p-4 text-white">
+                <h1 className="text-3xl font-semibold">Nutritional Insights</h1>
+            </header>
+
+            <main className="container mx-auto p-6">
+                {/* Loading indicator */}
+                {loading && (
+                    <div className="text-center p-4">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <p className="mt-2">Loading nutritional data...</p>
+                    </div>
+                )}
+
+                {/* Error display */}
+                {error && (
+                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                        {error}
+                    </div>
+                )}
+
+                {/* Summary Statistics */}
+                {insights?.summary && (
+                    <section className="mb-8">
+                        <h2 className="text-2xl font-semibold mb-4">Dashboard Overview</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                            <div className="bg-white p-4 shadow-lg rounded-lg">
+                                <h3 className="font-semibold text-gray-600">Total Recipes</h3>
+                                <p className="text-2xl font-bold text-blue-600">{insights.summary.total_recipes}</p>
+                            </div>
+                            <div className="bg-white p-4 shadow-lg rounded-lg">
+                                <h3 className="font-semibold text-gray-600">Diet Types</h3>
+                                <p className="text-2xl font-bold text-green-600">{insights.summary.total_diet_types}</p>
+                            </div>
+                            <div className="bg-white p-4 shadow-lg rounded-lg">
+                                <h3 className="font-semibold text-gray-600">Cuisine Types</h3>
+                                <p className="text-2xl font-bold text-purple-600">{insights.summary.total_cuisine_types}</p>
+                            </div>
+                            <div className="bg-white p-4 shadow-lg rounded-lg">
+                                <h3 className="font-semibold text-gray-600">Most Common Diet</h3>
+                                <p className="text-xl font-bold text-orange-600">{insights.summary.most_common_diet}</p>
+                            </div>
+                        </div>
+                    </section>
+                )}
+
+                {/* Charts Section */}
+                <section className="mb-8">
+                    <h2 className="text-2xl font-semibold mb-4">Explore Nutritional Insights</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+                        {/* Bar Chart */}
+                        <div className="bg-white p-4 shadow-lg rounded-lg">
+                            <h3 className="font-semibold mb-2">Bar Chart</h3>
+                            <p className="text-sm text-gray-600 mb-4">Average macronutrient content by diet type.</p>
+                            <div className="w-full h-48">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={transformBarChartData()}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="dietType" fontSize={10} />
+                                        <YAxis fontSize={10} />
+                                        <Tooltip />
+                                        <Bar dataKey="protein" fill="#8884d8" name="Protein" />
+                                        <Bar dataKey="carbs" fill="#82ca9d" name="Carbs" />
+                                        <Bar dataKey="fat" fill="#ffc658" name="Fat" />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* Scatter Plot */}
+                        <div className="bg-white p-4 shadow-lg rounded-lg">
+                            <h3 className="font-semibold mb-2">Scatter Plot</h3>
+                            <p className="text-sm text-gray-600 mb-2">Nutrient relationships.</p>
+                            <div className="mb-2 text-xs">
+                                <select
+                                    value={scatterX}
+                                    onChange={(e) => setScatterX(e.target.value)}
+                                    className="text-xs p-1 border rounded mr-1"
+                                >
+                                    <option value="Protein">Protein</option>
+                                    <option value="Carbs">Carbs</option>
+                                    <option value="Fat">Fat</option>
+                                </select>
+                                vs
+                                <select
+                                    value={scatterY}
+                                    onChange={(e) => setScatterY(e.target.value)}
+                                    className="text-xs p-1 border rounded ml-1"
+                                >
+                                    <option value="Carbs">Carbs</option>
+                                    <option value="Protein">Protein</option>
+                                    <option value="Fat">Fat</option>
+                                </select>
+                            </div>
+                            <div className="w-full h-32">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <ScatterChart data={transformScatterData()}>
+                                        <CartesianGrid />
+                                        <XAxis dataKey="x" fontSize={10} />
+                                        <YAxis dataKey="y" fontSize={10} />
+                                        <Tooltip
+                                            formatter={(value: any, name: string) => [value + 'g', name]}
+                                        />
+                                        <Scatter dataKey="y" fill="#8884d8" />
+                                    </ScatterChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* Heatmap */}
+                        <div className="bg-white p-4 shadow-lg rounded-lg">
+                            <h3 className="font-semibold mb-2">Heatmap</h3>
+                            <p className="text-sm text-gray-600 mb-4">Nutrient correlations.</p>
+                            <div className="w-full h-48 flex items-center justify-center">
+                                {heatmapData?.data ? (
+                                    <div
+                                        className="grid gap-1 h-full w-full"
+                                        style={{
+                                            gridTemplateColumns: `repeat(${heatmapData.labels?.length || 3}, 1fr)`
+                                        }}
+                                    >
+                                        {heatmapData.data.map((cell: any, index: number) => {
+                                            const intensity = Math.abs(cell.value);
+                                            const opacity = intensity * 0.8 + 0.2;
+                                            const bgColor = cell.value > 0 ?
+                                                `rgba(54, 162, 235, ${opacity})` :
+                                                `rgba(255, 99, 132, ${opacity})`;
+
+                                            return (
+                                                <div
+                                                    key={index}
+                                                    className="flex items-center justify-center text-xs font-medium"
+                                                    style={{
+                                                        backgroundColor: bgColor,
+                                                        color: intensity > 0.5 ? 'white' : 'black'
+                                                    }}
+                                                    title={`${cell.row_label} vs ${cell.col_label}: ${cell.value.toFixed(3)}`}
+                                                >
+                                                    {cell.value.toFixed(2)}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="text-gray-400">Loading heatmap...</div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Pie Chart */}
+                        <div className="bg-white p-4 shadow-lg rounded-lg">
+                            <h3 className="font-semibold mb-2">Pie Chart</h3>
+                            <p className="text-sm text-gray-600 mb-4">Recipe distribution by diet type.</p>
+                            <div className="w-full h-48">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={transformPieChartData()}
+                                            dataKey="value"
+                                            nameKey="name"
+                                            cx="50%"
+                                            cy="50%"
+                                            outerRadius={60}
+                                            fill="#8884d8"
+                                            label={false}
+                                        >
+                                            {transformPieChartData().map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+                {/* Filters and Data Interaction */}
+                <section className="mb-8">
+                    <h2 className="text-2xl font-semibold mb-4">Filters and Data Interaction</h2>
+                    <div className="flex flex-wrap gap-4">
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Search by Diet Type"
+                            className="p-2 border rounded w-full sm:w-auto"
+                        />
+                        <select
+                            value={selectedDietType}
+                            onChange={(e) => setSelectedDietType(e.target.value)}
+                            className="p-2 border rounded w-full sm:w-auto"
+                        >
+                            <option value="">All Diet Types</option>
+                            {dietTypes.map((diet) => (
+                                <option key={diet} value={diet}>{diet}</option>
+                            ))}
+                        </select>
+                        <button
+                            onClick={handleApplyFilters}
+                            className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
+                        >
+                            Apply Filters
+                        </button>
+                        <button
+                            onClick={handleClearFilters}
+                            className="bg-gray-600 text-white py-2 px-4 rounded hover:bg-gray-700"
+                        >
+                            Clear Filters
+                        </button>
+                    </div>
+                </section>
+
+                {/* API Data Interaction */}
+                <section className="mb-8">
+                    <h2 className="text-2xl font-semibold mb-4">API Data Interaction</h2>
+                    <div className="flex flex-wrap gap-4">
+                        <button
+                            onClick={loadNutritionalInsights}
+                            disabled={loading}
+                            className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            Get Nutritional Insights
+                        </button>
+                        <button
+                            onClick={() => loadRecipes(1)}
+                            disabled={loading}
+                            className="bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 disabled:opacity-50"
+                        >
+                            Get Recipes
+                        </button>
+                        <button
+                            onClick={loadClusters}
+                            disabled={loading}
+                            className="bg-purple-600 text-white py-2 px-4 rounded hover:bg-purple-700 disabled:opacity-50"
+                        >
+                            Get Clusters
+                        </button>
+                        <button
+                            onClick={loadAllCharts}
+                            disabled={loading}
+                            className="bg-orange-600 text-white py-2 px-4 rounded hover:bg-orange-700 disabled:opacity-50"
+                        >
+                            Refresh Charts
+                        </button>
+                    </div>
+                </section>
+
+                {/* Recipes Display */}
+                <section className="mb-8">
+                    <h2 className="text-2xl font-semibold mb-4">Recipes</h2>
+                    <div className="bg-white rounded-lg shadow-lg p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {recipes.map((recipe, index) => (
+                                <div key={index} className="bg-gray-50 p-3 rounded border">
+                                    <h4 className="font-semibold text-sm">{recipe.recipe_name}</h4>
+                                    <p className="text-xs text-gray-600">{recipe.diet_type} | {recipe.cuisine_type}</p>
+                                    <div className="mt-2 text-xs space-x-1">
+                                        <span className="bg-blue-100 px-2 py-1 rounded">P: {recipe.protein}g</span>
+                                        <span className="bg-red-100 px-2 py-1 rounded">C: {recipe.carbs}g</span>
+                                        <span className="bg-yellow-100 px-2 py-1 rounded">F: {recipe.fat}g</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                {/* Pagination */}
+                <section>
+                    <h2 className="text-2xl font-semibold mb-4">Pagination</h2>
+                    <div className="flex justify-center gap-2 mt-4">
+                        {currentPage > 1 && (
+                            <button
+                                onClick={() => loadRecipes(currentPage - 1)}
+                                className="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400"
+                            >
+                                Previous
+                            </button>
+                        )}
+
+                        {/* Page numbers */}
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            const page = Math.max(1, currentPage - 2) + i;
+                            if (page > totalPages) return null;
+
+                            return (
+                                <button
+                                    key={page}
+                                    onClick={() => loadRecipes(page)}
+                                    className={`px-3 py-1 rounded ${page === currentPage
+                                            ? 'bg-blue-600 text-white'
+                                            : 'bg-gray-300 hover:bg-gray-400'
+                                        }`}
+                                >
+                                    {page}
+                                </button>
+                            );
+                        })}
+
+                        {currentPage < totalPages && (
+                            <button
+                                onClick={() => loadRecipes(currentPage + 1)}
+                                className="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400"
+                            >
+                                Next
+                            </button>
+                        )}
+
+                        <span className="px-3 py-1 text-gray-600">
+                            Page {currentPage} of {totalPages} ({totalRecipes} total)
+                        </span>
+                    </div>
+                </section>
+
+                {/* Clusters Info */}
+                {clusters && (
+                    <section className="mb-8 mt-8">
+                        <h2 className="text-2xl font-semibold mb-4">Recipe Clusters</h2>
+                        <div className="bg-white rounded-lg shadow-lg p-4">
+                            <p className="text-sm text-gray-600 mb-4">
+                                Found {clusters.total_clusters} clusters using {clusters.clustering_method}
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {Object.values(clusters.clusters || {}).map((cluster: any, index: number) => (
+                                    <div key={index} className="bg-gray-50 p-3 rounded border">
+                                        <h4 className="font-semibold text-sm">Cluster {cluster.cluster_id}</h4>
+                                        <p className="text-xs text-gray-600">{cluster.size} recipes</p>
+                                        <div className="mt-2 text-xs">
+                                            <div>Avg Protein: {cluster.avg_protein}g</div>
+                                            <div>Avg Carbs: {cluster.avg_carbs}g</div>
+                                            <div>Avg Fat: {cluster.avg_fat}g</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+                )}
+
+            </main>
+
+            <footer className="bg-blue-600 p-4 text-white text-center mt-10">
+                <p>&copy; 2025 Nutritional Insights. All Rights Reserved.</p>
+            </footer>
+        </div>
+    );
 }
